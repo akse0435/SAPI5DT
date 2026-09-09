@@ -1,6 +1,6 @@
 @echo off
 setlocal enableextensions
-title Build DECtalk 4.99 SAPI5 - Win32 + x64
+title Build SAPI5 DECtalk - Win32 + x64 (Visual Studio 2022)
 
 rem Run from the SAPI5DT folder with VS2022 C++ and the v143 ATL component installed.
 
@@ -78,13 +78,9 @@ if not exist "%DIST%\ttseng.dll" (echo ERROR: ttseng.dll was not produced. & got
 if not exist "%DIST%\ttseng64.dll" (echo ERROR: ttseng64.dll was not produced. & goto :fail)
 
 echo [7/7] dtvoicemgr.exe
-rem No /I include on purpose so v143 gets the Windows SDK's own sapi.h.
-if not exist "%BUILD%\dtvoicemgr" mkdir "%BUILD%\dtvoicemgr"
-cd /d "%SAPIDIR%"
-cl /nologo /MT /W3 /O1 /D "NDEBUG" /D "WIN32" /D "_WINDOWS" /D "_MBCS" /D "_CRT_SECURE_NO_WARNINGS" /Fo"%BUILD%\dtvoicemgr\\" /c dtvoicemgr.c
-if errorlevel 1 (echo ERROR: voice manager compile failed. & goto :fail)
-link /nologo /subsystem:windows /out:"%DIST%\dtvoicemgr.exe" "%BUILD%\dtvoicemgr\dtvoicemgr.obj" kernel32.lib user32.lib gdi32.lib comctl32.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib
-if errorlevel 1 (echo ERROR: voice manager link failed. & goto :fail)
+rem Deliberately Win32: a 32-bit build can still preview through ttseng.dll.
+msbuild "%BUILD%\dtvoicemgr\DtVoiceMgr.vcxproj" /nologo /m /v:m /p:Configuration=Release /p:Platform=Win32
+if errorlevel 1 (echo ERROR: voice manager build failed. & goto :fail)
 if not exist "%DIST%\dtvoicemgr.exe" (echo ERROR: dtvoicemgr.exe was not produced. & goto :fail)
 
 echo.
@@ -120,7 +116,7 @@ rem Lines starting with three colons become build\_prepare.ps1 and cannot contai
 :::
 ::: # LLP64 fix of DECtalk's callback ABI, a no-op on Win32 where LONG_PTR is LONG.
 :::$typedefBlock = @'
-:::/* --- DECTALK_LLP64_CALLBACK_TYPES (auto-inserted by build.bat) --- */
+:::/* --- DECTALK_LLP64_CALLBACK_TYPES (auto-inserted by build_sapi5dt64.bat) --- */
 :::#ifndef DECTALK_LLP64_CALLBACK_TYPES
 :::#define DECTALK_LLP64_CALLBACK_TYPES
 :::#if defined(_WIN32) || defined(WIN32) || defined(_WIN64)
@@ -404,3 +400,63 @@ rem Lines starting with three colons become build\_prepare.ps1 and cannot contai
 :::'@
 :::
 :::Write-Src (Join-Path $stage 'TtsEng.vcxproj') $engProj
+:::
+::: # The voice manager is built Win32 so it can preview through the 32-bit engine.
+:::$mgrDir = Join-Path $SapiDir 'build\dtvoicemgr'
+:::if (-not (Test-Path -LiteralPath $mgrDir)) { New-Item -ItemType Directory -Path $mgrDir | Out-Null }
+:::
+:::$mgrProj = @'
+:::<?xml version="1.0" encoding="utf-8"?>
+:::<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+:::  <ItemGroup Label="ProjectConfigurations">
+:::    <ProjectConfiguration Include="Release|Win32">
+:::      <Configuration>Release</Configuration>
+:::      <Platform>Win32</Platform>
+:::    </ProjectConfiguration>
+:::  </ItemGroup>
+:::  <PropertyGroup Label="Globals">
+:::    <VCProjectVersion>17.0</VCProjectVersion>
+:::    <ProjectGuid>{C3D4E5F6-64B1-4E64-9C11-DEC7A1640003}</ProjectGuid>
+:::    <RootNamespace>DtVoiceMgr</RootNamespace>
+:::    <Keyword>Win32Proj</Keyword>
+:::  </PropertyGroup>
+:::  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+:::  <PropertyGroup Label="Configuration">
+:::    <ConfigurationType>Application</ConfigurationType>
+:::    <UseDebugLibraries>false</UseDebugLibraries>
+:::    <PlatformToolset>v143</PlatformToolset>
+:::    <CharacterSet>MultiByte</CharacterSet>
+:::    <WholeProgramOptimization>false</WholeProgramOptimization>
+:::  </PropertyGroup>
+:::  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+:::  <PropertyGroup>
+:::    <OutDir>$(ProjectDir)..\..\dist\</OutDir>
+:::    <IntDir>$(ProjectDir)obj\$(Platform)\</IntDir>
+:::    <TargetName>dtvoicemgr</TargetName>
+:::  </PropertyGroup>
+:::  <ItemDefinitionGroup>
+:::    <ClCompile>
+:::      <PreprocessorDefinitions>NDEBUG;WIN32;_WINDOWS;_MBCS;_CRT_SECURE_NO_WARNINGS</PreprocessorDefinitions>
+:::      <Optimization>MinSpace</Optimization>
+:::      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+:::      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+:::      <WarningLevel>Level3</WarningLevel>
+:::      <ConformanceMode>false</ConformanceMode>
+:::      <SDLCheck>false</SDLCheck>
+:::      <TreatWarningAsError>false</TreatWarningAsError>
+:::      <DebugInformationFormat>None</DebugInformationFormat>
+:::    </ClCompile>
+:::    <Link>
+:::      <SubSystem>Windows</SubSystem>
+:::      <GenerateDebugInformation>false</GenerateDebugInformation>
+:::      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;comctl32.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib</AdditionalDependencies>
+:::    </Link>
+:::  </ItemDefinitionGroup>
+:::  <ItemGroup>
+:::    <ClCompile Include="$(ProjectDir)..\..\dtvoicemgr.c" />
+:::  </ItemGroup>
+:::  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+:::</Project>
+:::'@
+:::
+:::Write-Src (Join-Path $mgrDir 'DtVoiceMgr.vcxproj') $mgrProj

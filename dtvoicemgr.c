@@ -403,15 +403,21 @@ static void describeViews(char *out, int cch)
 		lstrcpynA(out, "No registered DECtalk engine found", cch);
 }
 
+/* Test the views we will actually write to, not the one this process runs in. */
 static BOOL canWriteTokens(void)
 {
 	HKEY h;
-	if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, TOKENS_PATH, 0, KEY_WRITE, &h) == ERROR_SUCCESS)
+	int  i;
+
+	for (i = 0; i < 2; i++)
 	{
+		if (!g_viewOk[i]) continue;
+		if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, TOKENS_PATH, 0,
+						  KEY_WRITE | g_views[i], &h) != ERROR_SUCCESS)
+			return FALSE;
 		RegCloseKey(h);
-		return TRUE;
 	}
-	return FALSE;
+	return TRUE;
 }
 
 static BOOL writeVoiceView(const VOICEREC *v, REGSAM view)
@@ -1510,6 +1516,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 	(void)show;
 	g_inst = inst;
 
+	detectViews();
 	if (!canWriteTokens())
 	{
 		if (cmdline == NULL || strstr(cmdline, "/elevated") == NULL)
@@ -1521,7 +1528,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 
 	InitCommonControls();
 	g_comReady = SUCCEEDED(CoInitialize(NULL));
-	detectViews();
 	makeFonts();
 	if (!registerClasses())
 	{
