@@ -98,6 +98,12 @@ private:
 	DWORD m_rate;
 	DWORD m_language;
 
+	//Custom voice definition read from the voice token.
+	char  m_voiceParams[1024];
+	bool  m_dvPending;
+	short m_basePitch;
+	short m_baseRange;
+
 	//Volume hack
 	double gain;
 

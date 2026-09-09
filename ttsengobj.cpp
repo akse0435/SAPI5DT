@@ -17,32 +17,32 @@
 
 //--- Local
 
-//DECtalk pitch table
+//Each speaker's AP default, from the 11 kHz arrays in ph/p_us_vdf_dectalk43.c.
 static const short PitchTable[9] =
 {
-	122,
-	208,
-	89,
-	155,
-	110,
-	296,
-	240,
-	106,
-	200
+	122,	/* PAUL   */
+	208,	/* BETTY  */
+	89,		/* HARRY  */
+	155,	/* FRANK  */
+	110,	/* DENNIS */
+	306,	/* KIT    */
+	240,	/* URSULA */
+	106,	/* RITA   */
+	200		/* WENDY  */
 };
 
-//DECtalk range table
+//Each speaker's PR default, from the same arrays.
 static const short RangeTable[9] =
 {
-	100,
-	240,
-	80,
-	90,
-	135,
-	180,
-	135,
-	80,
-	175
+	100,	/* PAUL   */
+	240,	/* BETTY  */
+	80,		/* HARRY  */
+	90,		/* FRANK  */
+	135,	/* DENNIS */
+	210,	/* KIT    */
+	135,	/* URSULA */
+	80,		/* RITA   */
+	175		/* WENDY  */
 };
 
 //Convert SAPI rate to DECtalk rate
@@ -96,6 +96,11 @@ void CTTSEngObj::callback(LONG LParam1, LONG lParam2, DWORD user, UINT msg)
 	CTTSEngObj *SAPI = (CTTSEngObj*)user;
 	if(!SAPI || !SAPI->m_OutputSite)
 	{
+		//Hand the buffer back anyway, or the engine runs out of them.
+		if(SAPI && SAPI->engine && msg == SAPI->BufferMessage)
+		{
+			TextToSpeechAddBuffer(SAPI->engine, (LPTTS_BUFFER_T)lParam2);
+		}
 		return;
 	}
 	if(msg == SAPI->BufferMessage)
@@ -131,6 +136,11 @@ HRESULT CTTSEngObj::FinalConstruct()
 
 	m_OutputSite = NULL;
 	engine = NULL;
+
+	m_voiceParams[0] = 0;
+	m_dvPending = false;
+	m_basePitch = 0;
+	m_baseRange = 0;
 
 	memset(&caps, 0, sizeof(caps));
 	memset(buffer, 0, sizeof(buffer));
@@ -253,6 +263,33 @@ STDMETHODIMP CTTSEngObj::SetObjectToken(ISpObjectToken * pToken)
 		//Set default voice
 		TextToSpeechSetSpeaker(engine, m_voice);
 
+		//Zero means the token has no override, so the tables still apply.
+		DWORD dwTemp;
+		m_basePitch = 0;
+		m_baseRange = 0;
+		if(SUCCEEDED(m_cpToken->GetDWORD(L"VoicePitch", &dwTemp)))
+		{
+			m_basePitch = (short)dwTemp;
+		}
+		if(SUCCEEDED(m_cpToken->GetDWORD(L"VoiceRange", &dwTemp)))
+		{
+			m_baseRange = (short)dwTemp;
+		}
+
+		//Only stored here: Speak() applies it, where there is an output site.
+		m_voiceParams[0] = 0;
+		m_dvPending = false;
+		WCHAR *voiceparams = NULL;
+		m_cpToken->GetStringValue(L"VoiceParams", &voiceparams);
+		if(voiceparams)
+		{
+			WideCharToMultiByte(CP_ACP, 0, voiceparams, -1, m_voiceParams,
+								sizeof(m_voiceParams), NULL, NULL);
+			m_voiceParams[sizeof(m_voiceParams)-1] = 0;
+			CoTaskMemFree(voiceparams);
+			m_dvPending = (m_voiceParams[0] != 0);
+		}
+
 		//Check if we are in a valid range for m_rate
 		if(m_rate > caps.dwMaximumSpeakingRate)
 		{
@@ -362,6 +399,13 @@ ISpTTSEngineSite* pOutputSite )
 				return hr;
 			}
 
+			//Applied on the first utterance, where there is an output site.
+			if(m_dvPending && m_voiceParams[0])
+			{
+				TextToSpeechSpeak(engine, m_voiceParams, TTS_NORMAL);
+				m_dvPending = false;
+			}
+
 			//Set DECtalk voice parameters
 			TextToSpeechGetSpeaker(engine, &m_voice);
 			long rate = 0;
@@ -380,8 +424,10 @@ ISpTTSEngineSite* pOutputSite )
 			{
 				gain = 0;
 			}
-			long NewDTPitch = SAPI2DTPitch(pTextFragList->State.PitchAdj.MiddleAdj, PitchTable[m_voice]);
-			long NewDTRange = SAPI2DTRange(pTextFragList->State.PitchAdj.RangeAdj, RangeTable[m_voice]);
+			long NewDTPitch = SAPI2DTPitch(pTextFragList->State.PitchAdj.MiddleAdj,
+										   m_basePitch ? m_basePitch : PitchTable[m_voice]);
+			long NewDTRange = SAPI2DTRange(pTextFragList->State.PitchAdj.RangeAdj,
+										   m_baseRange ? m_baseRange : RangeTable[m_voice]);
 			if(NewDTRate != LastRate || NewDTPitch != LastPitch || NewDTRange != LastRange)
 			{
 				LastRate = NewDTRate;
